@@ -476,7 +476,7 @@ end
 -- Secondly, we call our poke detection in here.
 --
 function Main:OnChatMsgTextEmote( event, message, sender, language, 
-                                  a4, a5, a6, a7, a8, a9, a10, a11, 
+								  a4, a5, a6, a7, a8, a9, a10, a11, 
 								  guid, a13, a14 )
 								  
 	if guid ~= UnitGUID( "player" ) then
@@ -499,8 +499,45 @@ function Main:OnChatMsgTextEmote( event, message, sender, language,
 	-- and then when that's all good and done, we forward it to the normal
 	-- chat routines.
 	Main:OnChatMsg( event, message, sender, language, 
-	                a4, a5, a6, a7, a8, a9, a10, a11, guid, a13, a14 )
+				a4, a5, a6, a7, a8, a9, a10, a11, guid, a13, a14 )
 		
+end
+
+-------------------------------------------------------------------------------
+-- ChatFrame filter registration path.
+-- This function is registered with ChatFrame_AddMessageEventFilter where
+-- available. It forwards messages into the addon's normal handlers while
+-- avoiding direct introspection of other addons' filter tables.
+-- Returns true to block the message, false/nil to allow it.
+--
+function Main.ChatFrameFilter( chatFrame, event, message, sender, ... )
+    -- ignore empty sender
+    if not sender or sender == "" then return false end
+	-- Simple dedupe: ChatFrame filters run once per chatframe that would
+	-- display the message. Avoid processing duplicates by ignoring
+	-- identical event+sender+message tuples seen within a short window.
+	Main._cf_dedupe = Main._cf_dedupe or {}
+	local now = GetTime()
+	local key = (event or "") .. "|" .. (sender or "") .. "|" .. (message or "")
+	local last = Main._cf_dedupe[key]
+	if last and now - last < 0.5 then
+		return false
+	end
+	Main._cf_dedupe[key] = now
+
+	-- Text emotes have special handling (realm extraction + poke detection)
+	if event == "CHAT_MSG_TEXT_EMOTE" then
+		-- forward to existing handler which expects the same argument ordering
+		Main:OnChatMsgTextEmote( event, message, sender, ... )
+		return false
+	end
+
+	-- For other chat events forward to the main handler.
+	-- The filter callback provides (chatFrame, event, message, sender, language, ...)
+	Main:OnChatMsg( event, message, sender, ... )
+
+	-- Do not block the message by default.
+	return false
 end
 
 function Main:OnChatMsgClub( event, message, sender, language, channelName, sender2, specialFlags, zoneChannelID,
@@ -541,52 +578,16 @@ end
 -- The main chat event handler.
 --
 function Main:OnChatMsg( event, message, sender, language, a4, a5, a6, a7, a8, 
-                         a9, a10, a11, guid, a13, a14 )
+						 a9, a10, a11, guid, a13, a14 )
 						 
 	if sender == "" then return end
-	
-	local filters = ChatFrame_GetMessageEventFilters( event )
+    
 	event = event:sub( 10 )
 	
 	if event:find( "CHANNEL" ) and IGNORED_CHANNELS[a9:lower()] then
 		-- this channel is ignored and not logged.
 		return
 	end	
-	
-	if filters then -- in a rare case with very little addons, the filter
-	                -- list may actually be nil
-					
-		local skipfilters = false
-
-		if message:sub(1,3) == "|| " then
-			-- trp hack for npc emotes
-			skipfilters = true
-		elseif message:sub(1,2) == "'s" and event == "EMOTE" then
-			-- trp hack for 's stuff
-		--	skipfilters = true
-		end
-		
-		if not skipfilters then
-			for _, filterFunc in next, filters do
-				local block, na1, na2, na3, na4, na5, na6, na7, na8, na9, na10, na11, na12, na13, na14 = filterFunc( ListenerFrame1Chat, "CHAT_MSG_"..event, message, sender, language, a4, a5, a6, a7, a8, a9, a10, a11, guid, a13, a14 )
-				if( block ) then
-					return
-				elseif( na1 and type(na1) == "string" ) then
-					local skip = false
-					if event == "EMOTE" and message:sub(1,2) == "'s" and na1:sub(1,2) ~= "'s" then
-						skip = true -- block out trp's ['s] hack
-					end
-					if event == "EMOTE" and message:sub(1,2) == ", " and na1:sub(1,2) ~= ", " then
-						skip = true -- block out trp's [, ] hack
-					end
-					  
-					if not skip then
-						message, sender, language, a4, a5, a6, a7, a8, a9, a10, a11, guid, a13, a14 = na1, na2, na3, na4, na5, na6, na7, na8, na9, na10, na11, na12, na13, na14
-					end
-				end
-			end
-		end
-	end
 	
 	Main.AddChatHistory( sender, event, message, language, guid, a9 )
 end
@@ -1319,27 +1320,38 @@ function Main:OnEnable()
 	g_loadtime = GetTime()
 	Main:RegisterEvent( "FRIENDLIST_UPDATE", "OnFriendlistUpdate" )
 
-	Main:RegisterEvent( "CHAT_MSG_SAY",                  "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_EMOTE",                "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_TEXT_EMOTE",           "OnChatMsgTextEmote" )
-	Main:RegisterEvent( "CHAT_MSG_WHISPER",              "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_WHISPER_INFORM",       "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_PARTY",                "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_PARTY_LEADER",         "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_RAID",                 "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_RAID_LEADER",          "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_RAID_WARNING",         "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_YELL",                 "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_GUILD",                "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_OFFICER",              "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_CHANNEL",              "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_CHANNEL_JOIN",         "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_CHANNEL_LEAVE",        "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_INSTANCE_CHAT",        "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_INSTANCE_CHAT_LEADER", "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_GUILD_ITEM_LOOTED",    "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_GUILD_ACHIEVEMENT",    "OnChatMsg" )
-	Main:RegisterEvent( "CHAT_MSG_COMMUNITIES_CHANNEL",  "OnChatMsgClub" )
+	-- Register ChatFrame message event filters for all chat events.
+	-- This replaces the older AceEvent-based approach and is more robust
+	-- in Patch 11.2.7+ where ChatFrame_GetMessageEventFilters may not be available.
+	local chatEvents = {
+		"CHAT_MSG_SAY",
+		"CHAT_MSG_EMOTE",
+		"CHAT_MSG_TEXT_EMOTE",
+		"CHAT_MSG_WHISPER",
+		"CHAT_MSG_WHISPER_INFORM",
+		"CHAT_MSG_PARTY",
+		"CHAT_MSG_PARTY_LEADER",
+		"CHAT_MSG_RAID",
+		"CHAT_MSG_RAID_LEADER",
+		"CHAT_MSG_RAID_WARNING",
+		"CHAT_MSG_YELL",
+		"CHAT_MSG_GUILD",
+		"CHAT_MSG_OFFICER",
+		"CHAT_MSG_CHANNEL",
+		"CHAT_MSG_CHANNEL_JOIN",
+		"CHAT_MSG_CHANNEL_LEAVE",
+		"CHAT_MSG_INSTANCE_CHAT",
+		"CHAT_MSG_INSTANCE_CHAT_LEADER",
+		"CHAT_MSG_GUILD_ITEM_LOOTED",
+		"CHAT_MSG_GUILD_ACHIEVEMENT",
+		"CHAT_MSG_COMMUNITIES_CHANNEL",
+	}
+
+	if type( ChatFrame_AddMessageEventFilter ) == "function" then
+		for _,evt in ipairs( chatEvents ) do
+			ChatFrame_AddMessageEventFilter( evt, Main.ChatFrameFilter )
+		end
+	end
 	Main:RegisterEvent( "GUILD_MOTD",                    "OnGuildMOTD" )
 	Main:RegisterEvent( "CHAT_MSG_SYSTEM",               "OnSystemMsg" )
 	Main:RegisterMessage( "DiceMaster4_Roll",            "OnDiceMasterRoll" )
@@ -1378,4 +1390,41 @@ function Main:OnEnable()
 	
 	Main.Help_Init()
 	Main.InitConsole()
+end
+
+-------------------------------------------------------------------------------
+-- Clean up ChatFrame filters when the addon is disabled.
+-- This ensures we remove our registered filters to avoid leaving dangling
+-- callbacks if the addon is reloaded/unloaded.
+--
+function Main:OnDisable()
+	if type( ChatFrame_RemoveMessageEventFilter ) ~= "function" then return end
+
+	local chatEvents = {
+		"CHAT_MSG_SAY",
+		"CHAT_MSG_EMOTE",
+		"CHAT_MSG_TEXT_EMOTE",
+		"CHAT_MSG_WHISPER",
+		"CHAT_MSG_WHISPER_INFORM",
+		"CHAT_MSG_PARTY",
+		"CHAT_MSG_PARTY_LEADER",
+		"CHAT_MSG_RAID",
+		"CHAT_MSG_RAID_LEADER",
+		"CHAT_MSG_RAID_WARNING",
+		"CHAT_MSG_YELL",
+		"CHAT_MSG_GUILD",
+		"CHAT_MSG_OFFICER",
+		"CHAT_MSG_CHANNEL",
+		"CHAT_MSG_CHANNEL_JOIN",
+		"CHAT_MSG_CHANNEL_LEAVE",
+		"CHAT_MSG_INSTANCE_CHAT",
+		"CHAT_MSG_INSTANCE_CHAT_LEADER",
+		"CHAT_MSG_GUILD_ITEM_LOOTED",
+		"CHAT_MSG_GUILD_ACHIEVEMENT",
+		"CHAT_MSG_COMMUNITIES_CHANNEL",
+	}
+
+	for _,evt in ipairs( chatEvents ) do
+		ChatFrame_RemoveMessageEventFilter( evt, Main.ChatFrameFilter )
+	end
 end
