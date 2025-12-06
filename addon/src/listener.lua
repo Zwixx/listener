@@ -499,7 +499,7 @@ function Main:OnChatMsgTextEmote( event, message, sender, language,
 	-- and then when that's all good and done, we forward it to the normal
 	-- chat routines.
 	Main:OnChatMsg( event, message, sender, language, 
-				a4, a5, a6, a7, a8, a9, a10, a11, guid, a13, a14 )
+					a4, a5, a6, a7, a8, a9, a10, a11, guid, a13, a14 )
 		
 end
 
