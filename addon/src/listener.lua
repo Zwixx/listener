@@ -513,17 +513,6 @@ end
 function Main.ChatFrameFilter( chatFrame, event, message, sender, ... )
     -- ignore empty sender
     if not sender or sender == "" then return false end
-	-- Simple dedupe: ChatFrame filters run once per chatframe that would
-	-- display the message. Avoid processing duplicates by ignoring
-	-- identical event+sender+message tuples seen within a short window.
-	Main._cf_dedupe = Main._cf_dedupe or {}
-	local now = GetTime()
-	local key = (event or "") .. "|" .. (sender or "") .. "|" .. (message or "")
-	local last = Main._cf_dedupe[key]
-	if last and now - last < 0.5 then
-		return false
-	end
-	Main._cf_dedupe[key] = now
 
 	-- Text emotes have special handling (realm extraction + poke detection)
 	if event == "CHAT_MSG_TEXT_EMOTE" then
@@ -766,6 +755,17 @@ function Main.AddChatHistory( sender, event, message, language, guid, channel )
 	if guid then
 		Main.guidmap[sender] = guid
 	end
+	
+	-- Simple dedupe: Avoid adding duplicate entries to chat history for
+	-- identical event+sender+message tuples seen within a short window.
+	Main._history_dedupe = Main._history_dedupe or {}
+	local now = GetTime()
+	local key = (event or "") .. "|" .. (sender or "") .. "|" .. (message or "")
+	local last = Main._history_dedupe[key]
+	if last and now - last < 0.5 then
+		return
+	end
+	Main._history_dedupe[key] = now
 	
 	-- Create an entry in the chat history table if we don't have one yet.
 	Main.chat_history[sender] = Main.chat_history[sender] or {}
